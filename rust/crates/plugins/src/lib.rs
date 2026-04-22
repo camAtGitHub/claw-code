@@ -1049,10 +1049,9 @@ impl PluginManager {
     /// inaccessible at runtime (e.g. a root-owned repo directory).
     #[must_use]
     pub fn bundled_root() -> PathBuf {
-        // Candidate 1 & 2: runtime paths relative to the executable
+        // Candidate 1: standard FHS install layout — <prefix>/bin/claw -> <prefix>/share/claw/plugins/bundled
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                // Standard FHS-style install: <prefix>/bin/claw -> <prefix>/share/claw/plugins/bundled
                 let share_path = exe_dir
                     .join("..")
                     .join("share")
@@ -1063,7 +1062,7 @@ impl PluginManager {
                     return share_path;
                 }
 
-                // Simple adjacent layout: <exe_dir>/bundled
+                // Candidate 2: simple adjacent layout — <exe_dir>/bundled
                 let adjacent = exe_dir.join("bundled");
                 if adjacent.exists() {
                     return adjacent;
@@ -3121,15 +3120,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_default_bundled_root_does_not_fail() {
-        // When no bundled_root is configured and the auto-detected default does not
-        // exist, plugin list should succeed with an empty bundled section rather than
-        // returning an error.
+    fn explicit_nonexistent_bundled_root_does_not_fail() {
+        // When bundled_root is explicitly configured to a path that does not exist,
+        // plugin list should succeed with an empty bundled section rather than
+        // returning an error (discover_plugin_dirs treats NotFound as empty).
         let _guard = env_guard();
         let config_home = temp_dir("missing-bundled-home");
 
-        // Point bundled_root at a path that definitely does not exist so the
-        // default fallback is exercised.  We use a temp path that was never created.
         let nonexistent = temp_dir("nonexistent-bundled-XXXXXXXX");
         assert!(
             !nonexistent.exists(),
@@ -3140,18 +3137,40 @@ mod tests {
         config.bundled_root = Some(nonexistent);
         let manager = PluginManager::new(config);
 
-        // Should succeed with zero bundled plugins, not crash with EACCES or ENOENT.
+        // Should succeed with zero bundled plugins, not crash with ENOENT.
         let result = manager.list_installed_plugins();
         assert!(
             result.is_ok(),
-            "missing bundled root should not fail: {result:?}"
+            "nonexistent explicit bundled root should not fail: {result:?}"
         );
         let installed = result.unwrap();
         assert!(
             installed
                 .iter()
                 .all(|p| p.metadata.kind != PluginKind::Bundled),
-            "no bundled plugins should be installed when bundled root is missing"
+            "no bundled plugins should be installed when bundled root path does not exist"
+        );
+
+        let _ = fs::remove_dir_all(config_home);
+    }
+
+    #[test]
+    fn no_bundled_root_config_uses_auto_detection_without_panic() {
+        // When bundled_root is not set (None), auto-detection runs.  The resolved
+        // path should either exist (dev environment) or be a runtime-relative path
+        // that doesn't cause a panic or EACCES crash.
+        let _guard = env_guard();
+        let config_home = temp_dir("auto-detect-bundled-home");
+
+        // No bundled_root set — forces auto-detection in bundled_root().
+        let config = PluginManagerConfig::new(&config_home);
+        let manager = PluginManager::new(config);
+
+        // Should not panic or return a hard IO error.
+        let result = manager.list_installed_plugins();
+        assert!(
+            result.is_ok(),
+            "auto-detected bundled root resolution must not fail: {result:?}"
         );
 
         let _ = fs::remove_dir_all(config_home);
