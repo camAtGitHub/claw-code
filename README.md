@@ -1,5 +1,10 @@
 # Claw Code
 
+> [!TIP]
+> ## Rust Binary
+> To anyone that comes across this - there is a Linux compiled rust binary on the releases page, with an additional bug fix applied that upstream doesnt (at commit time) have.
+>
+</br>
 <p align="center">
   <a href="https://github.com/ultraworkers/claw-code">ultraworkers/claw-code</a>
   ·
